@@ -5,7 +5,7 @@
 ## 重要说明
 
 必须包含以下两个部分：
-1. `review_record`：包含整体审查评分的对象
+1. `review_record`：包含整体审查评分和仓库地址的对象
 2. `findings`：包含具体代码问题列表的数组
 
 ### 关于 matched_rule_ids 字段
@@ -28,7 +28,14 @@
 ```json
 {
   "review_record": {
-    "score": 0-100
+    "score": 0-100,
+    "gitlab_url": "https://gitlab.example.com/group/project",
+    "feedback_markdown": "可选：整份审查报告的 Markdown 文本",
+    "raw_finding_json": {
+      "summary": "可选：整份审查的原始 JSON 数据",
+      "total_score": 80,
+      "findings": []
+    }
   },
   "findings": [
     {
@@ -40,6 +47,10 @@
       "suggestion": "修复建议/示例方案",
       "severity": "严重|高|中|低",
       "category": "bug|建议|提示",
+      "feedback_markdown": "可选：单条问题的 Markdown 文本",
+      "raw_finding_json": {
+        "可选": "单条问题的原始 JSON 数据；未提供时 uploader 会使用当前 finding 对象"
+      },
       "matched_rule_ids": [1,2]
     }
   ]

@@ -10,6 +10,7 @@ import json
 import sys
 import os
 import argparse
+import shutil
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -55,6 +56,8 @@ class ReviewRecord:
         target_branch: str | None = None,
         gitlab_url: str | None = None,
         llm: str | None = None,
+        feedback_markdown: str | None = None,
+        raw_finding_json: Dict[str, Any] | None = None,
     ):
         self.repo_id = (
             int(repo_id) if repo_id is not None and str(repo_id).isdigit() else 0
@@ -69,6 +72,8 @@ class ReviewRecord:
         self.target_branch = target_branch
         self.gitlab_url = gitlab_url
         self.llm = llm
+        self.feedback_markdown = feedback_markdown
+        self.raw_finding_json = raw_finding_json
 
     def to_payload(self) -> Dict[str, Any]:
         """Return a dict payload that matches `ReviewRecordSchemaIn` expectations."""
@@ -84,6 +89,8 @@ class ReviewRecord:
             "target_branch": self.target_branch,
             "gitlab_url": self.gitlab_url,
             "llm": self.llm,
+            "feedback_markdown": self.feedback_markdown,
+            "raw_finding_json": self.raw_finding_json,
         }
         # Remove keys with None values for a minimal payload
         return {k: v for k, v in payload.items() if v is not None}
@@ -112,6 +119,11 @@ class ReviewSuggestion:
         matched_rules: list | None = None,
         status: str = "pending",
         project_category: str | None = None,
+        feedback_markdown: str | None = None,
+        raw_finding_json: Dict[str, Any] | None = None,
+        original_severity: str | None = None,
+        original_category: str | None = None,
+        original_status: str | None = None,
     ):
         self.review_record_id = review_record_id
         self.project_name = project_name
@@ -128,6 +140,11 @@ class ReviewSuggestion:
         self.matched_rules = matched_rules
         self.status = status
         self.project_category = project_category
+        self.feedback_markdown = feedback_markdown
+        self.raw_finding_json = raw_finding_json
+        self.original_severity = original_severity
+        self.original_category = original_category
+        self.original_status = original_status
 
     def to_payload(self) -> Dict[str, Any]:
         payload = {
@@ -146,6 +163,11 @@ class ReviewSuggestion:
             "matched_rules": self.matched_rules,
             "status": self.status or "pending",
             "project_category": self.project_category,
+            "feedback_markdown": self.feedback_markdown,
+            "raw_finding_json": self.raw_finding_json,
+            "original_severity": self.original_severity,
+            "original_category": self.original_category,
+            "original_status": self.original_status,
         }
         return {k: v for k, v in payload.items() if v is not None}
 
@@ -367,6 +389,168 @@ def read_input_file(file_path: str) -> str:
         sys.exit(1)
 
 
+def first_line_number(finding: Dict[str, Any]) -> int | None:
+    """Return the first line number from supported finding line formats."""
+    line = finding.get("line")
+    if line is not None:
+        return line
+
+    line_pairs = finding.get("line_number_pairs")
+    if not line_pairs:
+        return None
+
+    first_pair = line_pairs[0]
+    if isinstance(first_pair, dict):
+        return first_pair.get("start")
+    if isinstance(first_pair, (list, tuple)) and first_pair:
+        return first_pair[0]
+
+    return None
+
+
+def assemble_feedback_markdown(finding_data: Dict[str, Any]) -> str:
+    """Build structured markdown for one finding, matching backend ReviewService."""
+    markdown_parts = []
+
+    markdown_parts.append("## 问题描述")
+    file_path = finding_data.get("file")
+    line = first_line_number(finding_data)
+    message = finding_data.get("message", "发现问题")
+    if file_path and line:
+        markdown_parts.append(f"在 `{file_path}` 第{line}行发现{message}。")
+    else:
+        markdown_parts.append(message)
+
+    if finding_data.get("impact"):
+        markdown_parts.append("\n## 影响分析")
+        markdown_parts.append(finding_data["impact"])
+
+    solution = finding_data.get("solution") or finding_data.get("suggestion")
+    if solution:
+        markdown_parts.append("\n## 解决方案")
+        markdown_parts.append(solution)
+
+    if finding_data.get("prevention"):
+        markdown_parts.append("\n## 预防措施")
+        markdown_parts.append(finding_data["prevention"])
+
+    markdown_parts.append("\n## 评分")
+    if finding_data.get("severity"):
+        markdown_parts.append(f"- 严重性: {finding_data['severity']}")
+    if finding_data.get("priority"):
+        markdown_parts.append(f"- 修复优先级: {finding_data['priority']}")
+    if finding_data.get("estimated_time"):
+        markdown_parts.append(f"- 预估修复时间: {finding_data['estimated_time']}")
+
+    return "\n".join(markdown_parts)
+
+
+def build_review_raw_json(
+    review_record: Dict[str, Any], findings: list[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Build ReviewRecord.raw_finding_json from the upload JSON."""
+    if isinstance(review_record.get("raw_finding_json"), dict):
+        return review_record["raw_finding_json"]
+
+    score = review_record.get("score", 0)
+    raw_json = {
+        "summary": review_record.get("summary", f"代码审查完成，总分: {score}分"),
+        "total_score": review_record.get("total_score", score),
+        "score": score,
+        "gitlab_url": review_record.get("gitlab_url"),
+        "findings": findings,
+    }
+
+    score_breakdown = review_record.get("score_breakdown")
+    if score_breakdown:
+        raw_json["score_breakdown"] = score_breakdown
+
+    project_category = review_record.get("project_category")
+    if project_category:
+        raw_json["project_category"] = project_category
+
+    return {k: v for k, v in raw_json.items() if v is not None}
+
+
+def generate_comprehensive_markdown(json_data: Dict[str, Any]) -> str:
+    """Generate ReviewRecord feedback markdown, matching backend ReviewService."""
+    markdown_parts = ["# 代码审查报告"]
+
+    markdown_parts.append("\n## 评分")
+    total_score = json_data.get("total_score", json_data.get("score", 0))
+    markdown_parts.append(f"**总分**: {total_score}分")
+
+    score_breakdown = json_data.get("score_breakdown", {})
+    if score_breakdown:
+        markdown_parts.append("\n### 评分细分")
+        for category, score in score_breakdown.items():
+            category_name = {
+                "functionality": "功能性",
+                "performance": "性能",
+                "security": "安全性",
+                "best_practices": "最佳实践",
+            }.get(category, category)
+            markdown_parts.append(f"- **{category_name}**: {score}分")
+
+    findings = json_data.get("findings", [])
+    markdown_parts.append("\n## 发现的问题")
+    if not findings:
+        markdown_parts.append("未发现问题")
+        return "\n".join(markdown_parts)
+
+    for index, finding in enumerate(findings, 1):
+        severity = (
+            str(finding.get("severity", ""))
+            .replace("critical", "严重")
+            .replace("major", "重要")
+            .replace("minor", "次要")
+            .replace("info", "信息")
+        )
+        file_path = finding.get("file", "未指定文件")
+        line = first_line_number(finding)
+        line_info = f"第{line}行" if line else ""
+        title = finding.get("title") or finding.get("id", "未命名问题")
+
+        markdown_parts.append(f"\n### 问题 {index}: {title}")
+        markdown_parts.append(f"**严重性**: {severity}")
+        markdown_parts.append(f"**位置**: {file_path} {line_info}")
+        markdown_parts.append(f"**问题描述**: {finding.get('message', '无描述')}")
+
+        if finding.get("suggestion"):
+            markdown_parts.append(f"**改进建议**: {finding.get('suggestion')}")
+
+    return "\n".join(markdown_parts)
+
+
+def get_cleanup_root(file_path: str) -> str:
+    """Return the repository-like root that contains the generated .tmp path."""
+    abs_path = os.path.abspath(file_path)
+    parts = abs_path.split(os.sep)
+    for index in range(len(parts) - 1, -1, -1):
+        if parts[index] == ".tmp":
+            root_parts = parts[:index]
+            if not root_parts:
+                return os.sep
+            return os.sep.join(root_parts) or os.sep
+
+    return os.getcwd()
+
+
+def cleanup_review_artifacts(file_path: str) -> None:
+    """Delete generated review artifacts after successful upload."""
+    cleanup_root = get_cleanup_root(file_path)
+    tmp_dir = os.path.join(cleanup_root, ".tmp")
+    changelog_path = os.path.join(cleanup_root, "CHANGELOG.md")
+
+    if os.path.isdir(tmp_dir):
+        shutil.rmtree(tmp_dir)
+        logger.info(f"已删除临时目录: {tmp_dir}")
+
+    if os.path.exists(changelog_path):
+        os.remove(changelog_path)
+        logger.info(f"已删除 CHANGELOG.md: {changelog_path}")
+
+
 def get_git_remote_url() -> str:
     """Return origin remote URL from git config."""
     try:
@@ -393,9 +577,7 @@ def normalize_gitlab_url(git_url: str) -> str:
         netloc = parsed.hostname
         if parsed.port:
             netloc = f"{netloc}:{parsed.port}"
-        return urllib.parse.urlunparse(
-            ("https", netloc, parsed.path, "", "", "")
-        )
+        return urllib.parse.urlunparse(("https", netloc, parsed.path, "", "", ""))
 
     return git_url
 
@@ -453,6 +635,19 @@ def get_repo_id_from_gitlab_url(gitlab_url: str) -> str:
     return ""
 
 
+def resolve_repo_metadata(
+    args: argparse.Namespace, review_record: Dict[str, Any]
+) -> tuple[str, str, str]:
+    """Resolve repo id, repo name, and GitLab URL from final review metadata."""
+    gitlab_url = normalize_gitlab_url(
+        review_record.get("gitlab_url") or args.gitlab_url
+    )
+    repo_name = args.repo_name or get_gitlab_project_path(gitlab_url)
+    repo_id = args.repo_id or get_repo_id_from_gitlab_url(gitlab_url)
+
+    return repo_id, repo_name or "unknown", gitlab_url
+
+
 def get_param_value(
     conf: ConfigParser, param_name: str, env_var: str, fallback: str = None
 ) -> str:
@@ -483,7 +678,9 @@ def get_param_value(
     if param_name == "AUTHOR":
         # 从 git config 获取作者信息
         try:
-            author = subprocess.check_output(["git", "config", "user.name"]).decode().strip()
+            author = (
+                subprocess.check_output(["git", "config", "user.name"]).decode().strip()
+            )
             if author:
                 return author
         except Exception:
@@ -493,25 +690,19 @@ def get_param_value(
         gitlab_url = normalize_gitlab_url(get_git_remote_url())
         if gitlab_url:
             return gitlab_url
-    elif param_name == "REPO_ID":
-        # 尝试从 GitLab remote URL 调用 GitLab API 获取项目 ID
-        repo_id = get_repo_id_from_gitlab_url(get_git_remote_url())
-        if repo_id:
-            return repo_id
-    elif param_name == "REPO_NAME":
-        # 尝试从 git remote 获取 group/project 形式的项目名称
-        repo_name = get_gitlab_project_path(get_git_remote_url())
-        if repo_name:
-            return repo_name
     elif param_name == "SOURCE_BRANCH":
         # 尝试从 git 获取当前分支
         try:
-            source_branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).decode().strip()
+            source_branch = (
+                subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+                .decode()
+                .strip()
+            )
             if source_branch:
                 return source_branch
         except Exception:
             pass
-    
+
     # 3. 返回fallback值
     return fallback or ""
 
@@ -580,9 +771,11 @@ def main():
         "--source-branch",
         type=str,
         help="源分支",
-        default=get_param_value(conf, "SOURCE_BRANCH", "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"),
+        default=get_param_value(
+            conf, "SOURCE_BRANCH", "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
+        ),
     )
-    
+
     args = parser.parse_args()
 
     # 参数已经按照 conf -> env -> fallback 的顺序设置了默认值
@@ -624,20 +817,35 @@ def main():
         logger.error("输入文件缺少 'review_result' 字段，无法继续")
         auth.logout()
         sys.exit(1)
-        
+
     review_record = data_file.get("review_record", {})
     findings = data_file.get("findings", [])
+    record_raw_finding_json = build_review_raw_json(review_record, findings)
+    record_feedback_markdown = review_record.get(
+        "feedback_markdown"
+    ) or generate_comprehensive_markdown(record_raw_finding_json)
+    repo_id, project_name, review_gitlab_url = resolve_repo_metadata(
+        args, review_record
+    )
+    logger.info(
+        "项目信息: "
+        f"repo_id={repo_id or 'unknown'}, "
+        f"project_name={project_name}, "
+        f"gitlab_url={review_gitlab_url or 'unknown'}"
+    )
 
     # 创建 ReviewRecord
     rr_dto = ReviewRecord(
-        repo_id=args.repo_id or None,
+        repo_id=repo_id or None,
         review_id="0",
-        project_name=args.repo_name or args.gitlab_url.rsplit("/", 1)[-1].rsplit(".git", 1)[0],
+        project_name=project_name,
         review_type="manual",
         author=args.author,
         score=review_record.get("score", 0),
         source_branch=args.source_branch,
-        gitlab_url=args.gitlab_url,
+        gitlab_url=review_gitlab_url,
+        feedback_markdown=record_feedback_markdown,
+        raw_finding_json=record_raw_finding_json,
     )
 
     logger.info("正在创建 ReviewRecord")
@@ -671,12 +879,22 @@ def main():
             if line_pairs is None:
                 line = f.get("line", None)
                 if line is not None:
-                    line_pairs = [[line, line]]
+                    line_pairs = [{"start": line, "end": line}]
+
+            finding_raw_json = (
+                f.get("raw_finding_json")
+                if isinstance(f.get("raw_finding_json"), dict)
+                else f
+            )
+            finding_feedback_markdown = f.get(
+                "feedback_markdown"
+            ) or assemble_feedback_markdown(f)
+            status = f.get("status", "pending")
 
             suggestion = ReviewSuggestion(
                 review_record_id=review_record_id,
-                project_name=args.repo_name or args.gitlab_url.rsplit("/", 1)[-1].rsplit(".git", 1)[0],
-                title=f.get("id", "无标题"),
+                project_name=project_name,
+                title=f.get("title", "无标题"),
                 summary=f.get("summary", "暂无总结"),
                 message=f.get("message", "暂无信息"),
                 suggestion=f.get("suggestion", "暂无建议"),
@@ -688,6 +906,12 @@ def main():
                 code_url=None,
                 author=args.author,
                 matched_rules=f.get("matched_rule_ids", None),
+                status=status,
+                feedback_markdown=finding_feedback_markdown,
+                raw_finding_json=finding_raw_json,
+                original_severity=f.get("original_severity") or f.get("severity"),
+                original_category=f.get("original_category") or f.get("category"),
+                original_status=f.get("original_status") or status,
             )
 
             logger.info(
@@ -715,6 +939,7 @@ def main():
         "tmp_file": args.file_path,
     }
     logger.info(f"上传完成 summary: {json.dumps(summary)}")
+    cleanup_review_artifacts(args.file_path)
     # Logout
     auth.logout()
     return

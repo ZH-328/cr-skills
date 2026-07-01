@@ -8,7 +8,7 @@ AEGIS_USERNAME=superadmin
 AEGIS_PASSWORD=123456
 
 # 项目默认信息
-# REPO_ID 留空时，会尝试通过 git remote.origin.url 调用 GitLab API 自动获取
-# REPO_NAME 留空时，会尝试通过 git remote.origin.url 自动提取 group/project
+# REPO_ID 留空时，会通过最终 gitlab_url 调用 GitLab API 自动获取
+# REPO_NAME 留空时，会通过最终 gitlab_url 自动提取 group/project
 REPO_ID= 
 REPO_NAME= 

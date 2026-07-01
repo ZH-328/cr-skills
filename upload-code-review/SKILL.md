@@ -12,7 +12,8 @@ metadata:
 1. 按照[模板json](TEMPLATE.md)生成JSON格式的代码审查数据，语言为中文，json文件命名应该为`code-review-<月日时分>.json`，生成的json文件存储在`.tmp/code-review`目录下。
 2. 必须完全遵循[TEMPLATE.md](TEMPLATE.md)中的JSON规范。
 3. 运行上传脚本，将代码审查数据提交到Aegis平台。
-4. 请勿修改命令或添加其他标志。
+4. 上传成功后，脚本会根据 `--file-path` 定位被审查仓库，并删除该仓库下的 `.tmp` 目录和 `CHANGELOG.md`。
+5. 请勿修改命令或添加其他标志。
 
 ## 上传过程
 
