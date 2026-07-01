@@ -19,6 +19,8 @@ import subprocess
 from configparser import ConfigParser
 from typing import Optional, Dict, Any
 
+DEFAULT_SUGGESTION_STATUS = "completed"
+
 # Add parent directory to path to import project modules if needed
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -117,7 +119,7 @@ class ReviewSuggestion:
         code_url: str | None = None,
         author: str | None = None,
         matched_rules: list | None = None,
-        status: str = "pending",
+        status: str = DEFAULT_SUGGESTION_STATUS,
         project_category: str | None = None,
         feedback_markdown: str | None = None,
         raw_finding_json: Dict[str, Any] | None = None,
@@ -161,7 +163,7 @@ class ReviewSuggestion:
             "code_url": self.code_url,
             "author": self.author,
             "matched_rules": self.matched_rules,
-            "status": self.status or "pending",
+            "status": self.status or DEFAULT_SUGGESTION_STATUS,
             "project_category": self.project_category,
             "feedback_markdown": self.feedback_markdown,
             "raw_finding_json": self.raw_finding_json,
@@ -889,7 +891,7 @@ def main():
             finding_feedback_markdown = f.get(
                 "feedback_markdown"
             ) or assemble_feedback_markdown(f)
-            status = f.get("status", "pending")
+            status = f.get("status", DEFAULT_SUGGESTION_STATUS)
 
             suggestion = ReviewSuggestion(
                 review_record_id=review_record_id,

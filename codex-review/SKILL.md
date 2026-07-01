@@ -46,10 +46,12 @@ git diff --name-only | grep -E "(CHANGELOG|changelog)"
 
 If no changelog file is changed:
 
-1. Inspect `git diff --stat` and `git diff`.
-2. Generate a concise entry describing the intent of the current change.
-3. Insert it at the top of the `[Unreleased]` section in `CHANGELOG.md`.
-4. Continue the review workflow immediately.
+1. Tell the user that `codex-review` will create or update a temporary `CHANGELOG.md` to record the review intention, and that the upload step deletes `CHANGELOG.md` after a successful upload.
+2. Inspect `git diff --stat` and `git diff`.
+3. Generate a concise entry describing the intent of the current change.
+4. Insert it at the top of the `[Unreleased]` section in `CHANGELOG.md`.
+5. If no suitable `CHANGELOG.md` or `[Unreleased]` section exists, create a temporary `CHANGELOG.md` with the entry shape below.
+6. Continue the review workflow immediately.
 
 Entry shape:
 
@@ -61,8 +63,6 @@ Entry shape:
 - Describe the problem solved or behavior changed.
 - List the main affected modules or files.
 ```
-
-If no suitable `CHANGELOG.md` or `[Unreleased]` section exists, report that blocker instead of inventing a new release structure.
 
 ## 3. Stage Untracked Files
 
