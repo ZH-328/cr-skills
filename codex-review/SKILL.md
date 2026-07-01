@@ -1,8 +1,8 @@
 ---
 name: codex-review
-description: "Professional code review workflow for Codex. Automatically prepares code changes, runs lint and codex review, then uploads review results to Aegis. Triggers: code review, review, 代码审核, 代码审查, 检查代码"
+description: "Professional code review workflow for Codex. Automatically prepares code changes, runs lint and codex review, then writes local review JSON without uploading data. Triggers: code review, review, 代码审核, 代码审查, 检查代码"
 metadata:
-  short-description: Run Codex code review and upload Aegis results
+  short-description: Run Codex code review without uploading data
 ---
 
 # Codex Code Review Skill
@@ -28,7 +28,7 @@ This skill operates in three phases:
 
 1. **Preparation Phase** (current context): Check working directory, update CHANGELOG
 2. **Review Phase** (current task): Select and run lint + `codex review` commands directly
-3. **Upload Phase** (current context): Convert review output to Aegis JSON and invoke `upload-code-review`
+3. **Local Result Phase** (current context): Convert review output to local Aegis-compatible JSON, without invoking upload
 
 ## Execution Steps
 
@@ -214,9 +214,9 @@ If Codex finds Changelog description inconsistent with code logic:
 - **Code error** → Fix code
 - **Description inaccurate** → Update Changelog
 
-### 5. Generate Aegis Upload JSON
+### 5. Generate Local Review JSON
 
-After lint and `codex review` complete, convert the review result into the JSON format required by the `upload-code-review` skill.
+After lint and `codex review` complete, convert the review result into the local JSON format compatible with the `upload-code-review` skill template.
 
 **Output path:**
 
@@ -241,7 +241,7 @@ Create `.tmp/code-review` if it does not exist.
 
 1. Strictly follow `../upload-code-review/TEMPLATE.md`.
 2. `review_record.score` must be an integer or float from 0 to 100.
-3. If `codex review` reports no issues, still generate the JSON with `findings: []` so Aegis receives a review record.
+3. If `codex review` reports no issues, still generate the JSON with `findings: []` so the local review record is complete.
 4. For each issue found by `codex review`, create one `findings` item with:
    - `title`: concise issue title
    - `file`: repository-relative file path
@@ -267,30 +267,16 @@ Create `.tmp/code-review` if it does not exist.
 - Improvement that should be addressed but is not a confirmed defect → `建议`
 - Informational note or optional cleanup → `提示`
 
-### 6. Upload Review Result to Aegis
+### 6. Do Not Upload Review Result
 
-After generating the JSON file, invoke the `upload-code-review` skill to upload the review result to Aegis.
+After generating the JSON file, stop the code-review workflow. Do not invoke the `upload-code-review` skill, and do not run `../upload-code-review/scripts/uploader.py`.
 
-**Call target:**
+**Upload policy:**
 
-```text
-upload-code-review
-```
-
-**Upload command used by that skill:**
-
-```bash
-python ../upload-code-review/scripts/uploader.py --file-path <代码审查数据JSON文件路径>
-```
-
-Run this command from the `codex-review` skill directory, or keep the same relative relationship between `codex-review` and `upload-code-review`.
-
-**Failure policy:**
-
-- Upload is enabled by default for every successful `codex-review` run.
-- If upload succeeds, report the Aegis upload summary together with the review result.
-- If upload fails, keep the local review output and generated JSON file, report the upload failure reason, and do not mark the code review itself as failed.
-- Do not retry unless the user explicitly asks.
+- Upload is disabled for every `codex-review` run.
+- Keep the local review output and generated JSON file.
+- Report the review result and the local JSON file path only.
+- Only upload if the user explicitly requests the separate `upload-code-review` skill or directly asks to run the upload command.
 
 ## Complete Review Protocol
 
@@ -298,8 +284,8 @@ Run this command from the `codex-review` skill directory, or keep the same relat
 2. **[PREPARE] Stage Untracked Files** - Add all new files to git staging area (avoid codex P1 error)
 3. **[EXEC] Lint + codex review** - Run the selected lint and `codex review` commands directly
 4. **[FIX] Self-Correction** - Fix code or update description when intention ≠ implementation
-5. **[FORMAT] Generate Aegis JSON** - Convert codex review output to `upload-code-review` JSON format
-6. **[UPLOAD] upload-code-review** - Upload JSON to Aegis; report upload failures without blocking review results
+5. **[FORMAT] Generate Local Review JSON** - Convert codex review output to `upload-code-review` compatible JSON format
+6. **[STOP] No upload** - Do not invoke `upload-code-review` or run `uploader.py`
 
 ## Codex Review Command Reference
 
@@ -361,12 +347,12 @@ codex review --uncommitted -c model="o3"
 - codex command must be properly configured and logged in
 - codex automatically processes in batches for large changes
 - **CHANGELOG.md must be in uncommitted changes, otherwise Codex cannot see intention description**
-- **Aegis upload is automatic after successful review output generation**
-- **Aegis upload failure does not invalidate the local review result**
+- **Aegis upload is disabled in `codex-review`; keep results local**
+- **Do not invoke `upload-code-review` or run `uploader.py` unless the user explicitly asks for upload**
 
 ## Design Rationale
 
 1. **CHANGELOG update needs current context**: Use the user's request and current changes to generate an accurate intention description.
 2. **Codex review needs repository state**: Run `codex review` from the git repository after preparation is complete.
-3. **Aegis JSON generation needs review output**: Convert review findings into the platform upload schema after the review command finishes.
-4. **Upload failure is non-blocking**: Preserve local review output and JSON even when Aegis upload fails.
+3. **Local JSON generation needs review output**: Convert review findings into the existing review JSON schema after the review command finishes.
+4. **Upload is opt-in**: Preserve local review output and JSON; upload only when explicitly requested separately.
