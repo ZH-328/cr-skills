@@ -25,6 +25,7 @@ python scripts/uploader.py --file-path <代码审查数据JSON文件路径>
 
 ### 填写参数
 - `--file-path`：包含要上传的代码审查数据的 JSON 文件的路径。
+- `PRIVATE_TOKEN`：GitLab `PRIVATE-TOKEN` 环境变量，应提前写入当前 shell 环境，用于在 `REPO_ID` 为空时自动获取 GitLab 项目 ID。
 
 ### 最佳实践
 

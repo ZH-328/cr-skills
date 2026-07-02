@@ -591,7 +591,7 @@ def get_gitlab_project_path(gitlab_url: str) -> str:
 
 
 def get_repo_id_from_gitlab_url(
-    gitlab_url: str, gitlab_access_token: str = ""
+    gitlab_url: str, private_token: str = ""
 ) -> str:
     """Fetch GitLab project id from remote URL via GitLab Projects API."""
     normalized_url = normalize_gitlab_url(gitlab_url)
@@ -609,8 +609,8 @@ def get_repo_id_from_gitlab_url(
 
     api_url = f"{parsed.scheme}://{netloc}/api/v4/projects/{project_path}"
     headers = {}
-    if gitlab_access_token:
-        headers["GITLAB-ACCESS-TOKEN"] = gitlab_access_token
+    if private_token:
+        headers["PRIVATE-TOKEN"] = private_token
 
     try:
         req = urllib.request.Request(api_url, headers=headers, method="GET")
@@ -634,7 +634,7 @@ def resolve_repo_metadata(
     )
     repo_name = args.repo_name or get_gitlab_project_path(gitlab_url)
     repo_id = args.repo_id or get_repo_id_from_gitlab_url(
-        gitlab_url, args.gitlab_access_token
+        gitlab_url, args.private_token
     )
 
     return repo_id, repo_name or "unknown", gitlab_url
@@ -688,15 +688,14 @@ def build_review_suggestion(
 
 
 def get_param_value(
-    conf: ConfigParser, param_name: str, env_var: str, fallback: str = None
+    conf: ConfigParser, param_name: str, fallback: str = None
 ) -> str:
     """
-    获取参数值，顺序：conf -> env -> fallback
+    获取参数值，顺序：conf -> fallback
 
     Args:
         conf: ConfigParser对象
         param_name: 配置文件中的参数名
-        env_var: 环境变量名
         fallback: 默认fallback值
 
     Returns:
@@ -708,12 +707,7 @@ def get_param_value(
         if conf_value:
             return conf_value
 
-    # 2. 从环境变量获取
-    env_value = os.getenv(env_var)
-    if env_value:
-        return env_value
-
-    # 3. 特殊方法获取
+    # 2. 特殊方法获取
     if param_name == "AUTHOR":
         # 从 git config 获取作者信息
         try:
@@ -757,73 +751,62 @@ def main():
         "--base-url",
         type=str,
         help="Aegis API基础URL",
-        default=get_param_value(
-            conf, "AEGIS_BASE_URL", "AEGIS_BASE_URL", "http://localhost:8000/api"
-        ),
+        default=get_param_value(conf, "AEGIS_BASE_URL", "http://localhost:8000/api"),
     )
     parser.add_argument(
         "--username",
         type=str,
         help="用户名",
-        default=get_param_value(conf, "AEGIS_USERNAME", "AEGIS_USERNAME"),
+        default=get_param_value(conf, "AEGIS_USERNAME"),
     )
     parser.add_argument(
         "--password",
         type=str,
         help="密码",
-        default=get_param_value(conf, "AEGIS_PASSWORD", "AEGIS_PASSWORD"),
+        default=get_param_value(conf, "AEGIS_PASSWORD"),
     )
     # 创建报告参数
     parser.add_argument(
         "--repo-id",
         type=str,
         help="GitLab项目ID",
-        default=get_param_value(conf, "REPO_ID", "CI_MERGE_REQUEST_PROJECT_ID"),
+        default=get_param_value(conf, "REPO_ID"),
     )
     parser.add_argument(
         "--repo-name",
         type=str,
         help="项目名称",
-        default=get_param_value(conf, "REPO_NAME", "CI_MERGE_REQUEST_PROJECT_PATH"),
+        default=get_param_value(conf, "REPO_NAME"),
     )
     parser.add_argument(
         "--gitlab-url",
         type=str,
         help="GitLab项目URL",
-        default=get_param_value(conf, "GITLAB_URL", "CI_MERGE_REQUEST_PROJECT_URL"),
-    )
-    parser.add_argument(
-        "--gitlab-access-token",
-        type=str,
-        help="GitLab GITLAB-ACCESS-TOKEN，用于自动获取REPO_ID",
-        default=conf.get("DEFAULT", "GITLAB-ACCESS-TOKEN", fallback="").strip(),
+        default=get_param_value(conf, "GITLAB_URL"),
     )
     parser.add_argument(
         "--file-path",
         type=str,
         help="json结果文件路径",
-        default=get_param_value(
-            conf, "ANALYSIS_REPORT_FILE_PATH", "ANALYSIS_REPORT_FILE_PATH"
-        ),
+        default=get_param_value(conf, "ANALYSIS_REPORT_FILE_PATH"),
     )
     parser.add_argument(
         "--author",
         type=str,
         help="作者",
-        default=get_param_value(conf, "AUTHOR", "CI_COMMIT_AUTHOR"),
+        default=get_param_value(conf, "AUTHOR"),
     )
     parser.add_argument(
         "--source-branch",
         type=str,
         help="源分支",
-        default=get_param_value(
-            conf, "SOURCE_BRANCH", "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
-        ),
+        default=get_param_value(conf, "SOURCE_BRANCH"),
     )
 
     args = parser.parse_args()
+    args.private_token = os.getenv("PRIVATE_TOKEN", "").strip()
 
-    # 参数已经按照 conf -> env -> fallback 的顺序设置了默认值
+    # 参数已经按照 conf -> fallback 的顺序设置了默认值
     username = args.username
     password = args.password
 
@@ -831,7 +814,7 @@ def main():
         logger.error("错误: 请提供用户名和密码")
         logger.info("可以通过以下方式提供:")
         logger.info("1. 命令行参数: --username <用户名> --password <密码>")
-        logger.info("2. 环境变量: AEGIS_USERNAME, AEGIS_PASSWORD")
+        logger.info("2. 配置文件: script.conf")
         sys.exit(1)
 
     # Initialize auth helper
