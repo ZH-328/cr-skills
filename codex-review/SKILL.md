@@ -1,6 +1,6 @@
 ---
 name: codex-review
-description: "Professional code review workflow for Codex. Automatically prepares code changes, runs lint and codex review, writes review JSON, and uploads it. Triggers: code review, review, 代码审核, 代码审查, 检查代码"
+description: "Professional code review workflow for Codex. Automatically prepares code changes, runs codex review, writes review JSON, and uploads it. Triggers: code review, review, 代码审核, 代码审查, 检查代码"
 metadata:
   short-description: Run Codex code review and upload Aegis JSON
 ---
@@ -9,18 +9,17 @@ metadata:
 
 ## Purpose
 
-Run a code review workflow that combines implementation changes with a short intention record, executes lint plus `codex review`, writes an Aegis-compatible JSON result, and uploads it through `upload-code-review`.
+Run a code review workflow that combines implementation changes with a short intention record, executes `codex review`, writes an Aegis-compatible JSON result, and uploads it through `upload-code-review`.
 
 ## Execution Protocol
 
 1. Check working directory status.
-2. Ensure the review intention is recorded in `CHANGELOG.md`.
+2. Create a fresh temporary `CHANGELOG.md` that records the review intention.
 3. Stage untracked files so `codex review` can see them.
 4. Select review effort from change size.
-5. Run lint plus `codex review` from the repository root.
-6. Fix code or CHANGELOG if review output shows an intention/implementation mismatch.
-7. Generate the local review JSON.
-8. Invoke `upload-code-review` to upload the generated JSON.
+5. Run `codex review` from the repository root.
+6. Generate the local review JSON.
+7. Invoke `upload-code-review` to upload the generated JSON.
 
 ## 1. Check Repository State
 
@@ -38,20 +37,13 @@ Review mode:
 
 ## 2. Record Review Intention
 
-Before reviewing uncommitted changes, check whether `CHANGELOG.md` is part of the current diff:
+Before reviewing uncommitted changes:
 
-```bash
-git diff --name-only | grep -E "(CHANGELOG|changelog)"
-```
-
-If no changelog file is changed:
-
-1. Tell the user that `codex-review` will create or update a temporary `CHANGELOG.md` to record the review intention, and that the upload step deletes `CHANGELOG.md` after a successful upload.
+1. Tell the user that `codex-review` will create a fresh temporary `CHANGELOG.md` to record the review intention.
 2. Inspect `git diff --stat` and `git diff`.
-3. Generate a concise entry describing the intent of the current change.
-4. Insert it at the top of the `[Unreleased]` section in `CHANGELOG.md`.
-5. If no suitable `CHANGELOG.md` or `[Unreleased]` section exists, create a temporary `CHANGELOG.md` with the entry shape below.
-6. Continue the review workflow immediately.
+3. Generate a concise entry that is strictly based on the current code diff, so the changelog content matches the implementation being reviewed.
+4. Create a new temporary `CHANGELOG.md` with the entry shape below.
+5. Continue the review workflow immediately.
 
 Entry shape:
 
@@ -91,28 +83,18 @@ Otherwise use `model_reasoning_effort=high` and a 10 minute timeout.
 
 When parsing `git diff --stat`, treat omitted insertion or deletion counts as `0`, and handle both singular and plural Git wording.
 
-## 5. Run Lint And Codex Review
+## 5. Run Codex Review
 
 Choose the command from [codex-runner.md](codex-runner.md), based on:
 
-- Project type: Go, Node, Python, or clean working tree
 - Review mode: `--uncommitted`, `--commit HEAD`, or another explicit base mode
 - Review effort: `high` or `xhigh`
 
-Run the selected command directly from the repository root. Commands joined with `&&` must stop if lint fails; report the lint failure instead of continuing silently.
+Run the selected command directly from the repository root.
 
-## 6. Self-Correction
+## 6. Generate Aegis Upload JSON
 
-If review output shows the CHANGELOG intent does not match the implementation:
-
-- Fix the code when the implementation is wrong.
-- Update `CHANGELOG.md` when the description is inaccurate.
-
-Then rerun the necessary checks before generating the JSON result.
-
-## 7. Generate Aegis Upload JSON
-
-After lint and `codex review` complete, create:
+After `codex review` completes, create:
 
 ```bash
 .tmp/code-review/code-review-<月日时分>.json
@@ -130,7 +112,7 @@ Rules:
 - Use `findings: []` when `codex review` reports no issues.
 - Do not invent `matched_rule_ids`; use `[]` unless a predefined rule is explicitly known.
 
-## 8. Upload Review Result
+## 7. Upload Review Result
 
 After generating the JSON file, invoke the `upload-code-review` skill to upload the review result to Aegis.
 
