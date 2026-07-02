@@ -119,7 +119,7 @@ After generating the JSON file, invoke the `upload-code-review` skill to upload 
 Use the generated JSON path as the upload input:
 
 ```bash
-python scripts/uploader.py --file-path <代码审查数据JSON文件路径>
+python3 scripts/uploader.py --file-path <代码审查数据JSON文件路径>
 ```
 
 Failure policy:

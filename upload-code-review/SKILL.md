@@ -21,7 +21,7 @@ metadata:
 > 脚本路径相对于该skill目录。执行脚本时请从`upload-code-review` skill目录开始执行，或保持等价的相对路径。
 
 ````bash
-python scripts/uploader.py --file-path <代码审查数据JSON文件路径>
+python3 scripts/uploader.py --file-path <代码审查数据JSON文件路径>
 ````
 
 ### 填写参数
@@ -32,5 +32,5 @@ python scripts/uploader.py --file-path <代码审查数据JSON文件路径>
 ### 最佳实践
 
 ````bash
-python scripts/uploader.py --file-path ".tmp/code-review/code-review-123.json"
+python3 scripts/uploader.py --file-path ".tmp/code-review/code-review-123.json"
 ````
