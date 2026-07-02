@@ -12,3 +12,5 @@ AEGIS_PASSWORD=123456
 # REPO_NAME 留空时，会通过最终 gitlab_url 自动提取 group/project
 REPO_ID= 
 REPO_NAME= 
+# PRIVATE_TOKEN 会作为 GitLab PRIVATE-TOKEN 请求头，用于自动获取 REPO_ID
+PRIVATE_TOKEN=

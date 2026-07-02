@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+from __future__ import annotations
+
 """
 Aegis Analysis Report Client Script
 
@@ -20,10 +22,7 @@ from configparser import ConfigParser
 from typing import Optional, Dict, Any
 
 DEFAULT_SUGGESTION_STATUS = "completed"
-
-# Add parent directory to path to import project modules if needed
-# sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
+DEFAULT_REVIEW_RECORD_STATUS = "completed"
 
 # Configure logging
 logging.basicConfig(
@@ -31,7 +30,6 @@ logging.basicConfig(
     format="[%(asctime)s][%(levelname)s][%(filename)s:%(funcName)s:%(lineno)d] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        # logging.FileHandler('uploader.log', encoding='utf-8')
     ],
 )
 logger = logging.getLogger(__name__)
@@ -58,6 +56,7 @@ class ReviewRecord:
         target_branch: str | None = None,
         gitlab_url: str | None = None,
         llm: str | None = None,
+        status: str = DEFAULT_REVIEW_RECORD_STATUS,
         feedback_markdown: str | None = None,
         raw_finding_json: Dict[str, Any] | None = None,
     ):
@@ -74,6 +73,7 @@ class ReviewRecord:
         self.target_branch = target_branch
         self.gitlab_url = gitlab_url
         self.llm = llm
+        self.status = status
         self.feedback_markdown = feedback_markdown
         self.raw_finding_json = raw_finding_json
 
@@ -91,6 +91,7 @@ class ReviewRecord:
             "target_branch": self.target_branch,
             "gitlab_url": self.gitlab_url,
             "llm": self.llm,
+            "status": self.status or DEFAULT_REVIEW_RECORD_STATUS,
             "feedback_markdown": self.feedback_markdown,
             "raw_finding_json": self.raw_finding_json,
         }
@@ -343,13 +344,8 @@ class AegisClient:
                 status = response.status
                 try:
                     content = response.read().decode("utf-8")
-                    status = json.loads(content).get("code", status)
-                    # Try parsing JSON, fallback to raw text
-                    try:
-                        return status, json.loads(content)
-                    except Exception:
-                        logger.error("无法解析JSON响应，返回原始内容")
-                        return status, {"result": content}
+                    json_result = json.loads(content)
+                    return json_result.get("code", status), json_result
                 except Exception as e:
                     logger.error(f"无法解析响应: {e}")
                     return status, {}
@@ -594,17 +590,11 @@ def get_gitlab_project_path(gitlab_url: str) -> str:
     return project_path
 
 
-def get_gitlab_project_path_for_api(gitlab_url: str) -> str:
-    """Extract URL-encoded GitLab project path from a remote URL."""
-    project_path = get_gitlab_project_path(gitlab_url)
-    return urllib.parse.quote(project_path, safe="")
-
-
-def get_repo_id_from_gitlab_url(gitlab_url: str) -> str:
+def get_repo_id_from_gitlab_url(gitlab_url: str, private_token: str = "") -> str:
     """Fetch GitLab project id from remote URL via GitLab Projects API."""
     normalized_url = normalize_gitlab_url(gitlab_url)
     parsed = urllib.parse.urlparse(normalized_url)
-    project_path = get_gitlab_project_path_for_api(normalized_url)
+    project_path = urllib.parse.quote(get_gitlab_project_path(normalized_url), safe="")
 
     if not parsed.scheme or not parsed.netloc or not project_path:
         return ""
@@ -617,12 +607,8 @@ def get_repo_id_from_gitlab_url(gitlab_url: str) -> str:
 
     api_url = f"{parsed.scheme}://{netloc}/api/v4/projects/{project_path}"
     headers = {}
-    token = os.getenv("GITLAB_TOKEN") or os.getenv("PRIVATE_TOKEN")
-    if token:
-        headers["PRIVATE-TOKEN"] = token
-    job_token = os.getenv("CI_JOB_TOKEN")
-    if job_token:
-        headers["JOB-TOKEN"] = job_token
+    if private_token:
+        headers["PRIVATE-TOKEN"] = private_token
 
     try:
         req = urllib.request.Request(api_url, headers=headers, method="GET")
@@ -645,9 +631,58 @@ def resolve_repo_metadata(
         review_record.get("gitlab_url") or args.gitlab_url
     )
     repo_name = args.repo_name or get_gitlab_project_path(gitlab_url)
-    repo_id = args.repo_id or get_repo_id_from_gitlab_url(gitlab_url)
+    repo_id = args.repo_id or get_repo_id_from_gitlab_url(
+        gitlab_url, args.private_token
+    )
 
     return repo_id, repo_name or "unknown", gitlab_url
+
+
+def build_review_suggestion(
+    finding: Dict[str, Any],
+    review_record_id: int,
+    project_name: str,
+    author: str,
+) -> ReviewSuggestion:
+    """Build a ReviewSuggestion DTO from one finding."""
+    line_pairs = finding.get("line_number_pairs")
+    if line_pairs is None:
+        line = finding.get("line")
+        if line is not None:
+            line_pairs = [{"start": line, "end": line}]
+
+    raw_json = (
+        finding.get("raw_finding_json")
+        if isinstance(finding.get("raw_finding_json"), dict)
+        else finding
+    )
+    feedback_markdown = finding.get("feedback_markdown") or assemble_feedback_markdown(
+        finding
+    )
+    status = finding.get("status", DEFAULT_SUGGESTION_STATUS)
+
+    return ReviewSuggestion(
+        review_record_id=review_record_id,
+        project_name=project_name,
+        title=finding.get("title", "无标题"),
+        summary=finding.get("summary", "暂无总结"),
+        message=finding.get("message", "暂无信息"),
+        suggestion=finding.get("suggestion", "暂无建议"),
+        file_path=finding.get("file"),
+        line_number_pairs=line_pairs,
+        severity=finding.get("severity"),
+        category=finding.get("category"),
+        project_category=finding.get("project_category"),
+        code_url=None,
+        author=author,
+        matched_rules=finding.get("matched_rule_ids"),
+        status=status,
+        feedback_markdown=feedback_markdown,
+        raw_finding_json=raw_json,
+        original_severity=finding.get("original_severity") or finding.get("severity"),
+        original_category=finding.get("original_category") or finding.get("category"),
+        original_status=finding.get("original_status") or status,
+    )
 
 
 def get_param_value(
@@ -756,6 +791,12 @@ def main():
         default=get_param_value(conf, "GITLAB_URL", "CI_MERGE_REQUEST_PROJECT_URL"),
     )
     parser.add_argument(
+        "--private-token",
+        type=str,
+        help="GitLab PRIVATE-TOKEN，用于自动获取REPO_ID",
+        default=conf.get("DEFAULT", "PRIVATE_TOKEN", fallback="").strip(),
+    )
+    parser.add_argument(
         "--file-path",
         type=str,
         help="json结果文件路径",
@@ -814,9 +855,8 @@ def main():
         auth.logout()
         sys.exit(1)
 
-    # If JSON review_result present, upload as review_record + suggestion
     if "review_record" not in data_file:
-        logger.error("输入文件缺少 'review_result' 字段，无法继续")
+        logger.error("输入文件缺少 'review_record' 字段，无法继续")
         auth.logout()
         sys.exit(1)
 
@@ -846,13 +886,13 @@ def main():
         score=review_record.get("score", 0),
         source_branch=args.source_branch,
         gitlab_url=review_gitlab_url,
+        status=review_record.get("status", DEFAULT_REVIEW_RECORD_STATUS),
         feedback_markdown=record_feedback_markdown,
         raw_finding_json=record_raw_finding_json,
     )
 
     logger.info("正在创建 ReviewRecord")
     rr_res = auth.create_review_record(rr_dto)
-    created_rr = None
     if rr_res is None:
         logger.error("创建 ReviewRecord 失败")
         auth.logout()
@@ -876,44 +916,8 @@ def main():
     created_suggestions = []
     for f in findings:
         try:
-            # Prepare Suggestion fields
-            line_pairs = f.get("line_number_pairs", None)
-            if line_pairs is None:
-                line = f.get("line", None)
-                if line is not None:
-                    line_pairs = [{"start": line, "end": line}]
-
-            finding_raw_json = (
-                f.get("raw_finding_json")
-                if isinstance(f.get("raw_finding_json"), dict)
-                else f
-            )
-            finding_feedback_markdown = f.get(
-                "feedback_markdown"
-            ) or assemble_feedback_markdown(f)
-            status = f.get("status", DEFAULT_SUGGESTION_STATUS)
-
-            suggestion = ReviewSuggestion(
-                review_record_id=review_record_id,
-                project_name=project_name,
-                title=f.get("title", "无标题"),
-                summary=f.get("summary", "暂无总结"),
-                message=f.get("message", "暂无信息"),
-                suggestion=f.get("suggestion", "暂无建议"),
-                file_path=f.get("file", None),
-                line_number_pairs=line_pairs,
-                severity=f.get("severity", None),
-                category=f.get("category", None),
-                project_category=f.get("project_category", None),
-                code_url=None,
-                author=args.author,
-                matched_rules=f.get("matched_rule_ids", None),
-                status=status,
-                feedback_markdown=finding_feedback_markdown,
-                raw_finding_json=finding_raw_json,
-                original_severity=f.get("original_severity") or f.get("severity"),
-                original_category=f.get("original_category") or f.get("category"),
-                original_status=f.get("original_status") or status,
+            suggestion = build_review_suggestion(
+                f, review_record_id, project_name, args.author
             )
 
             logger.info(
@@ -944,7 +948,6 @@ def main():
     cleanup_review_artifacts(args.file_path)
     # Logout
     auth.logout()
-    return
 
 
 if __name__ == "__main__":
