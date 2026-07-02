@@ -590,7 +590,9 @@ def get_gitlab_project_path(gitlab_url: str) -> str:
     return project_path
 
 
-def get_repo_id_from_gitlab_url(gitlab_url: str, private_token: str = "") -> str:
+def get_repo_id_from_gitlab_url(
+    gitlab_url: str, gitlab_access_token: str = ""
+) -> str:
     """Fetch GitLab project id from remote URL via GitLab Projects API."""
     normalized_url = normalize_gitlab_url(gitlab_url)
     parsed = urllib.parse.urlparse(normalized_url)
@@ -607,8 +609,8 @@ def get_repo_id_from_gitlab_url(gitlab_url: str, private_token: str = "") -> str
 
     api_url = f"{parsed.scheme}://{netloc}/api/v4/projects/{project_path}"
     headers = {}
-    if private_token:
-        headers["PRIVATE-TOKEN"] = private_token
+    if gitlab_access_token:
+        headers["GITLAB-ACCESS-TOKEN"] = gitlab_access_token
 
     try:
         req = urllib.request.Request(api_url, headers=headers, method="GET")
@@ -632,7 +634,7 @@ def resolve_repo_metadata(
     )
     repo_name = args.repo_name or get_gitlab_project_path(gitlab_url)
     repo_id = args.repo_id or get_repo_id_from_gitlab_url(
-        gitlab_url, args.private_token
+        gitlab_url, args.gitlab_access_token
     )
 
     return repo_id, repo_name or "unknown", gitlab_url
@@ -791,10 +793,10 @@ def main():
         default=get_param_value(conf, "GITLAB_URL", "CI_MERGE_REQUEST_PROJECT_URL"),
     )
     parser.add_argument(
-        "--private-token",
+        "--gitlab-access-token",
         type=str,
-        help="GitLab PRIVATE-TOKEN，用于自动获取REPO_ID",
-        default=conf.get("DEFAULT", "PRIVATE_TOKEN", fallback="").strip(),
+        help="GitLab GITLAB-ACCESS-TOKEN，用于自动获取REPO_ID",
+        default=conf.get("DEFAULT", "GITLAB-ACCESS-TOKEN", fallback="").strip(),
     )
     parser.add_argument(
         "--file-path",
