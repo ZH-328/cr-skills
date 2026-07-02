@@ -23,6 +23,8 @@ from typing import Optional, Dict, Any
 
 DEFAULT_SUGGESTION_STATUS = "completed"
 DEFAULT_REVIEW_RECORD_STATUS = "completed"
+DEFAULT_REVIEW_TYPE = "manual"
+MULTICA_REVIEW_TYPE = "Multica_Review"
 
 # Configure logging
 logging.basicConfig(
@@ -48,7 +50,7 @@ class ReviewRecord:
         repo_id: int | None,
         review_id: str,
         project_name: str | None = None,
-        review_type: str = "manual",
+        review_type: str = DEFAULT_REVIEW_TYPE,
         author: str | None = None,
         score: float = 0.0,
         develop_manager_id: int = 0,
@@ -743,6 +745,47 @@ def get_param_value(
     return fallback or ""
 
 
+def contains_multica(value: Any) -> bool:
+    """Return True when a value contains a Multica marker."""
+    if value is None:
+        return False
+    if isinstance(value, (dict, list, tuple, set)):
+        try:
+            value = json.dumps(value, ensure_ascii=False)
+        except Exception:
+            value = str(value)
+    return "multica" in str(value).lower()
+
+
+def resolve_review_type(
+    args: argparse.Namespace,
+    conf: ConfigParser,
+    data_file: Dict[str, Any],
+    extra_markers: list[Any] | None = None,
+) -> str:
+    """Use Multica review type only when upload context contains Multica API/token markers."""
+    markers: list[Any] = [
+        args.base_url,
+        args.web_url,
+        args.private_token,
+        data_file.get("review_record", {}).get("gitlab_url"),
+        data_file.get("review_record", {}).get("raw_finding_json"),
+    ]
+
+    markers.extend(f"{key}={value}" for key, value in conf.defaults().items())
+    if extra_markers:
+        markers.extend(extra_markers)
+
+    for key, value in os.environ.items():
+        upper_key = key.upper()
+        if "MULTICA" in upper_key or "TOKEN" in upper_key or "API" in upper_key:
+            markers.append(f"{key}={value}")
+
+    if any(contains_multica(marker) for marker in markers):
+        return MULTICA_REVIEW_TYPE
+    return DEFAULT_REVIEW_TYPE
+
+
 def main():
     """Main function"""
 
@@ -857,11 +900,13 @@ def main():
     repo_id, project_name, review_gitlab_url = resolve_repo_metadata(
         args, review_record
     )
+    review_type = resolve_review_type(args, conf, data_file, [auth.token])
     logger.info(
         "项目信息: "
         f"repo_id={repo_id or 'unknown'}, "
         f"project_name={project_name}, "
-        f"gitlab_url={review_gitlab_url or 'unknown'}"
+        f"gitlab_url={review_gitlab_url or 'unknown'}, "
+        f"review_type={review_type}"
     )
 
     # 创建 ReviewRecord
@@ -869,7 +914,7 @@ def main():
         repo_id=repo_id or None,
         review_id="0",
         project_name=project_name,
-        review_type="manual",
+        review_type=review_type,
         author=args.author,
         score=review_record.get("score", 0),
         source_branch=args.source_branch,
