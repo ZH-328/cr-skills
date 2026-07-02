@@ -549,18 +549,6 @@ def cleanup_review_artifacts(file_path: str) -> None:
         logger.info(f"已删除 CHANGELOG.md: {changelog_path}")
 
 
-def get_git_remote_url() -> str:
-    """Return origin remote URL from git config."""
-    try:
-        return (
-            subprocess.check_output(["git", "config", "--get", "remote.origin.url"])
-            .decode()
-            .strip()
-        )
-    except Exception:
-        return ""
-
-
 def normalize_gitlab_url(git_url: str) -> str:
     """Normalize common GitLab remote URL formats to HTTPS URL."""
     if not git_url:
@@ -629,9 +617,9 @@ def resolve_repo_metadata(
     args: argparse.Namespace, review_record: Dict[str, Any]
 ) -> tuple[str, str, str]:
     """Resolve repo id, repo name, and GitLab URL from final review metadata."""
-    gitlab_url = normalize_gitlab_url(
-        review_record.get("gitlab_url") or args.gitlab_url
-    )
+    gitlab_url = normalize_gitlab_url(review_record.get("gitlab_url") or "")
+    if not gitlab_url:
+        logger.warning("输入 JSON 缺少 review_record.gitlab_url，无法解析 GitLab 项目 URL")
     repo_name = args.repo_name or get_gitlab_project_path(gitlab_url)
     repo_id = args.repo_id or get_repo_id_from_gitlab_url(
         gitlab_url, args.private_token
@@ -718,11 +706,6 @@ def get_param_value(
                 return author
         except Exception:
             pass
-    elif param_name == "GITLAB_URL":
-        # 尝试从 git remote 获取 URL
-        gitlab_url = normalize_gitlab_url(get_git_remote_url())
-        if gitlab_url:
-            return gitlab_url
     elif param_name == "SOURCE_BRANCH":
         # 尝试从 git 获取当前分支
         try:
@@ -777,12 +760,6 @@ def main():
         type=str,
         help="项目名称",
         default=get_param_value(conf, "REPO_NAME"),
-    )
-    parser.add_argument(
-        "--gitlab-url",
-        type=str,
-        help="GitLab项目URL",
-        default=get_param_value(conf, "GITLAB_URL"),
     )
     parser.add_argument(
         "--file-path",
