@@ -628,6 +628,26 @@ def resolve_repo_metadata(
     return repo_id, repo_name or "unknown", gitlab_url
 
 
+def derive_aegis_web_url(api_base_url: str) -> str:
+    """Derive the Aegis web URL from the API base URL."""
+    parsed = urllib.parse.urlparse(api_base_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/api"):
+        path = path[: -len("/api")]
+    elif path == "api":
+        path = ""
+
+    return urllib.parse.urlunparse(
+        (parsed.scheme, parsed.netloc, path.rstrip("/"), "", "", "")
+    ).rstrip("/")
+
+
+def build_review_result_url(web_url: str, api_base_url: str, review_record_id: int) -> str:
+    """Build the frontend URL for the created review record."""
+    base_url = (web_url or "").strip().rstrip("/") or derive_aegis_web_url(api_base_url)
+    return f"{base_url}/#/biz/suggestion?record_id={review_record_id}"
+
+
 def build_review_suggestion(
     finding: Dict[str, Any],
     review_record_id: int,
@@ -735,6 +755,12 @@ def main():
         type=str,
         help="Aegis API基础URL",
         default=get_param_value(conf, "AEGIS_BASE_URL", "http://localhost:8000/api"),
+    )
+    parser.add_argument(
+        "--web-url",
+        type=str,
+        help="Aegis前端基础URL，用于生成审查结果地址",
+        default=get_param_value(conf, "AEGIS_WEB_URL"),
     )
     parser.add_argument(
         "--username",
@@ -873,6 +899,10 @@ def main():
         sys.exit(1)
 
     logger.info(f"ReviewRecord 创建成功: id={review_record_id}")
+    review_result_url = build_review_result_url(
+        args.web_url, args.base_url, review_record_id
+    )
+    logger.info(f"Aegis审查结果地址: {review_result_url}")
 
     # 创建 Suggestions
     created_suggestions = []
@@ -903,6 +933,7 @@ def main():
     # Print a minimal summary JSON for caller
     summary = {
         "review_record_id": review_record_id,
+        "review_url": review_result_url,
         "suggestions_created": len(created_suggestions),
         "tmp_file": args.file_path,
     }

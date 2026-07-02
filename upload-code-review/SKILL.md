@@ -12,8 +12,9 @@ metadata:
 1. 按照[模板json](TEMPLATE.md)生成JSON格式的代码审查数据，语言为中文，json文件命名应该为`code-review-<月日时分>.json`，生成的json文件存储在`.tmp/code-review`目录下。
 2. 必须完全遵循[TEMPLATE.md](TEMPLATE.md)中的JSON规范。
 3. 运行上传脚本，将代码审查数据提交到Aegis平台。
-4. 上传成功后，脚本会根据 `--file-path` 定位被审查仓库，并删除该仓库下的 `.tmp` 目录和 `CHANGELOG.md`。
-5. 请勿修改命令或添加其他标志。
+4. 上传成功后，脚本会输出 Aegis 审查结果地址，格式为 `AEGIS_WEB_URL/#/biz/suggestion?record_id=<ReviewRecord ID>`。
+5. 上传成功后，脚本会根据 `--file-path` 定位被审查仓库，并删除该仓库下的 `.tmp` 目录和 `CHANGELOG.md`。
+6. 请勿修改命令或添加其他标志。
 
 ## 上传过程
 
@@ -25,6 +26,7 @@ python scripts/uploader.py --file-path <代码审查数据JSON文件路径>
 
 ### 填写参数
 - `--file-path`：包含要上传的代码审查数据的 JSON 文件的路径。
+- `AEGIS_WEB_URL`：Aegis 前端地址，用于生成审查结果链接；留空时从 `AEGIS_BASE_URL` 去掉 `/api` 后派生。
 - `PRIVATE_TOKEN`：GitLab `PRIVATE-TOKEN` 环境变量，应提前写入当前 shell 环境，用于在 `REPO_ID` 为空时自动获取 GitLab 项目 ID。
 
 ### 最佳实践

@@ -2,6 +2,8 @@
 # Aegis API Configuration
 # API服务器地址
 AEGIS_BASE_URL=http://localhost:8000/api
+# 前端地址，用于生成审查结果链接；留空时从 AEGIS_BASE_URL 去掉 /api 后派生
+AEGIS_WEB_URL=http://localhost:3000
 
 # 登录凭据
 AEGIS_USERNAME=superadmin
